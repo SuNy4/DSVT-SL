@@ -8,6 +8,15 @@ import tqdm
 from pcdet.models import load_data_to_gpu
 from pcdet.utils import common_utils
 
+try:
+    import open3d
+    from visual_utils import open3d_vis_utils as V
+    OPEN3D_FLAG = True
+except:
+    #import mayavi.mlab as mlab
+    from visual_utils import visualize_utils as V
+    OPEN3D_FLAG = False
+
 
 def statistics_info(cfg, ret_dict, metric, disp_dict):
     for cur_thresh in cfg.MODEL.POST_PROCESSING.RECALL_THRESH_LIST:
@@ -25,6 +34,10 @@ def eval_one_epoch(cfg, args, model, dataloader, epoch_id, logger, dist_test=Fal
     final_output_dir = result_dir / 'final_result' / 'data'
     if args.save_to_file:
         final_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if args.visualize:
+        vis_path = final_output_dir / 'visualize'
+        vis_path.mkdir(parents=True, exist_ok=True)
 
     metric = {
         'gt_num': 0,
@@ -77,6 +90,13 @@ def eval_one_epoch(cfg, args, model, dataloader, epoch_id, logger, dist_test=Fal
             batch_dict, pred_dicts, class_names,
             output_path=final_output_dir if args.save_to_file else None
         )
+        
+        if getattr(args, 'visualize', False):
+            V.draw_scenes(
+                points=batch_dict['points'][:, 1:], gt_boxes=batch_dict['gt_boxes'][0], ref_boxes=annos[0]['boxes_lidar'],
+                ref_scores=annos[0]['score'], ref_labels=annos[0]['pred_labels'], save_path=str(vis_path / f"{batch_dict['metadata'][0]['token']}.jpg")
+            )
+
         det_annos += annos
         if cfg.LOCAL_RANK == 0:
             progress_bar.set_postfix(disp_dict)
