@@ -36,6 +36,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
         # just for centerhead
         hm_loss_disp = common_utils.AverageMeter()
         loc_loss_disp = common_utils.AverageMeter()
+        iou_loss_disp = common_utils.AverageMeter()
+        iou_reg_loss_disp = common_utils.AverageMeter()
         rcnn_cls_loss_disp = common_utils.AverageMeter()
         rcnn_reg_loss_disp = common_utils.AverageMeter()
 
@@ -104,13 +106,18 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
             forward_time.update(avg_forward_time)
             batch_time.update(avg_batch_time)
             loss_disp.update(loss.item())
-            
+
             # for centerhead
             if 'hm_loss_head_0' in list(tb_dict.keys()) and 'loc_loss_head_0' in list(tb_dict.keys()):
                 hm_loss_disp.update(tb_dict['hm_loss_head_0'])
                 loc_loss_disp.update(tb_dict['loc_loss_head_0'])
                 disp_dict.update({
                 'loss_hm': f'{hm_loss_disp.avg:.4f}', 'loss_loc': f'{loc_loss_disp.avg:.4f}'})
+            if 'iou_reg_loss_head_0' in list(tb_dict.keys()) and 'iou_loss_head_0' in list(tb_dict.keys()):
+                iou_loss_disp.update(tb_dict['iou_loss_head_0'])
+                iou_reg_loss_disp.update(tb_dict['iou_reg_loss_head_0'])
+                disp_dict.update({
+                'iou_loss': f'{iou_loss_disp.avg:.4f}', 'iou_reg_loss': f'{iou_reg_loss_disp.avg:.4f}'})
             if 'rcnn_loss_reg' in list(tb_dict.keys()) and 'rcnn_loss_cls' in list(tb_dict.keys()):
                 rcnn_cls_loss_disp.update(tb_dict['rcnn_loss_cls'])
                 rcnn_reg_loss_disp.update(tb_dict['rcnn_loss_reg'])
@@ -142,7 +149,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
                         # To show the GPU utilization, please install gpustat through "pip install gpustat"
                         gpu_info = os.popen('gpustat').read()
                         logger.info(gpu_info)
-                    
+
                     loss_disp.reset()  # WHY
                     hm_loss_disp.reset()
                     loc_loss_disp.reset()
@@ -200,8 +207,8 @@ def train_model(model, optimizer, train_loader, model_func, lr_scheduler, optim_
                 cur_scheduler = lr_warmup_scheduler
             else:
                 cur_scheduler = lr_scheduler
-            
-            hook_config = cfg.get('HOOK', None) 
+
+            hook_config = cfg.get('HOOK', None)
             if hook_config is not None:
                 DisableAugmentationHook = hook_config.get('DisableAugmentationHook', None)
                 if DisableAugmentationHook is not None:
@@ -211,7 +218,7 @@ def train_model(model, optimizer, train_loader, model_func, lr_scheduler, optim_
                         from pathlib import Path
                         DISABLE_AUG_LIST = cfg.HOOK.DisableAugmentationHook.DISABLE_AUG_LIST
                         dataset_cfg=cfg.DATA_CONFIG
-                        # This hook turns off some data augmentation strategies. 
+                        # This hook turns off some data augmentation strategies.
                         logger.info(f'Disable augmentations: {DISABLE_AUG_LIST}')
                         dataset_cfg.DATA_AUGMENTOR.DISABLE_AUG_LIST = DISABLE_AUG_LIST
                         class_names=cfg.CLASS_NAMES

@@ -11,14 +11,14 @@ class DSVT(nn.Module):
     Args:
         INPUT_LAYER: Config of input layer, which converts the output of vfe to dsvt input.
         block_name (list[string]): Name of blocks for each stage. Length: stage_num.
-        set_info (list[list[int, int]]): A list of set config for each stage. Eelement i contains 
+        set_info (list[list[int, int]]): A list of set config for each stage. Eelement i contains
             [set_size, block_num], where set_size is the number of voxel in a set and block_num is the
             number of blocks for stage i. Length: stage_num.
         d_model (list[int]): Number of input channels for each stage. Length: stage_num.
         nhead (list[int]): Number of attention heads for each stage. Length: stage_num.
-        dim_feedforward (list[int]): Dimensions of the feedforward network in set attention for each stage. 
+        dim_feedforward (list[int]): Dimensions of the feedforward network in set attention for each stage.
             Length: stage num.
-        dropout (float): Drop rate of set attention. 
+        dropout (float): Drop rate of set attention.
         activation (string): Name of activation layer in set attention.
         reduction_type (string): Pooling method between stages. One of: "attention", "maxpool", "linear".
         output_shape (tuple[int, int]): Shape of output bev feature.
@@ -40,7 +40,7 @@ class DSVT(nn.Module):
         self.reduction_type = self.model_cfg.get('reduction_type', 'attention')
         # save GPU memory
         self.use_torch_ckpt = self.model_cfg.get('ues_checkpoint', False)
- 
+
         # Sparse Regional Attention Blocks
         stage_num = len(block_name)
         for stage_id in range(stage_num):
@@ -87,14 +87,14 @@ class DSVT(nn.Module):
     def forward(self, batch_dict):
         '''
         Args:
-            bacth_dict (dict): 
+            bacth_dict (dict):
                 The dict contains the following keys
-                - voxel_features (Tensor[float]): Voxel features after VFE. Shape of (N, d_model[0]), 
+                - voxel_features (Tensor[float]): Voxel features after VFE. Shape of (N, d_model[0]),
                     where N is the number of input voxels.
                 - voxel_coords (Tensor[int]): Shape of (N, 4), corresponding voxel coordinates of each voxels.
-                    Each row is (batch_id, z, y, x). 
+                    Each row is (batch_id, z, y, x).
                 - ...
-        
+
         Returns:
             bacth_dict (dict):
                 The dict contains the following keys
@@ -134,7 +134,7 @@ class DSVT(nn.Module):
                 pool_volume = prepool_features.shape[1]
                 prepool_features[pooling_mapping_index[stage_id], pooling_index_in_pool[stage_id]] = output
                 prepool_features = prepool_features.view(prepool_features.shape[0], -1)
-                
+
                 if self.reduction_type == 'linear':
                     output = self.__getattr__(f'stage_{stage_id}_reduction')(prepool_features)
                 elif self.reduction_type == 'maxpool':
@@ -348,19 +348,19 @@ class DSVT_TrtEngine(nn.Module):
         activation = self.model_cfg.activation
         self.reduction_type = self.model_cfg.get('reduction_type', 'attention')
         stage_num = len(block_name)
- 
+
         input_names = [
             'src',
-            'set_voxel_inds_tensor_shift_0', 
-            'set_voxel_inds_tensor_shift_1', 
-            'set_voxel_masks_tensor_shift_0', 
+            'set_voxel_inds_tensor_shift_0',
+            'set_voxel_inds_tensor_shift_1',
+            'set_voxel_masks_tensor_shift_0',
             'set_voxel_masks_tensor_shift_1',
             'pos_embed_tensor'
         ]
         output_names = ["output",]
         trt_path = self.model_cfg.trt_engine
         self.allptransblockstrt = TRTWrapper(trt_path, input_names, output_names)
-        
+
         self.num_shifts = [2] * stage_num
         self.output_shape = self.model_cfg.output_shape
         self.stage_num = stage_num
