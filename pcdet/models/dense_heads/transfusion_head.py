@@ -78,7 +78,7 @@ class TransFusionHead(nn.Module):
 
         self.query_radius = 20
         self.query_range = torch.arange(-self.query_radius, self.query_radius+1)
-        self.query_r_coor_x, self.query_r_coor_y = torch.meshgrid(self.query_range, self.query_range) 
+        self.query_r_coor_x, self.query_r_coor_y = torch.meshgrid(self.query_range, self.query_range)
 
         num_heads = self.model_cfg.NUM_HEADS
         dropout = self.model_cfg.DROPOUT
@@ -98,7 +98,7 @@ class TransFusionHead(nn.Module):
         self.loss_heatmap_weight = self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['hm_weight']
         self.loss_iou_rescore_weight = self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['loss_iou_rescore_weight']
 
-        self.code_size = 10
+        self.code_size = 8
 
         # a shared convolution
         self.shared_conv = nn.Conv2d(in_channels=input_channels,out_channels=hidden_channel,kernel_size=3,padding=1)
@@ -124,7 +124,8 @@ class TransFusionHead(nn.Module):
         # Position Embedding for Cross-Attention, which is re-used during training
         x_size = self.grid_size[0] // self.feature_map_stride
         y_size = self.grid_size[1] // self.feature_map_stride
-        self.bev_pos = self.create_2D_grid(x_size, y_size)
+        # self.bev_pos = self.create_2D_grid(x_size, y_size).to('cuda')
+        self.register_buffer("bev_pos", self.create_2D_grid(x_size, y_size))
 
         self.forward_ret_dict = {}
 
@@ -161,8 +162,7 @@ class TransFusionHead(nn.Module):
         lidar_feat_flatten = lidar_feat.view(
             batch_size, lidar_feat.shape[1], -1
         )
-        bev_pos = self.bev_pos.repeat(batch_size, 1, 1).to(lidar_feat.device)
-
+        bev_pos = self.bev_pos.repeat(batch_size, 1, 1)
         # query initialization
         dense_heatmap = self.heatmap_head(lidar_feat)
         heatmap = dense_heatmap.detach().sigmoid()
@@ -181,9 +181,11 @@ class TransFusionHead(nn.Module):
         elif self.dataset_name == "Waymo":
             local_max[ :, 1, ] = F.max_pool2d(heatmap[:, 1], kernel_size=1, stride=1, padding=0)
             local_max[ :, 2, ] = F.max_pool2d(heatmap[:, 2], kernel_size=1, stride=1, padding=0)
+        elif self.dataset_name == "custom":
+            local_max[ :, 2, ] = F.max_pool2d(heatmap[:, 2], kernel_size=1, stride=1, padding=0)
         heatmap = heatmap * (heatmap == local_max)
         heatmap = heatmap.view(batch_size, heatmap.shape[1], -1)
- 
+
         # top num_proposals among all classes
         top_proposals = heatmap.view(batch_size, -1).argsort(dim=-1, descending=True)[
             ..., : self.num_proposals
@@ -198,7 +200,7 @@ class TransFusionHead(nn.Module):
 
         # add category embedding
         one_hot = F.one_hot(top_proposals_class, num_classes=self.num_classes).permute(0, 2, 1)
-        
+
         query_cat_encoding = self.class_encoding(one_hot.float())
         query_feat += query_cat_encoding
 
@@ -208,10 +210,10 @@ class TransFusionHead(nn.Module):
         )
 
 
-        # compute local key 
+        # compute local key
         top_proposals_x = top_proposals_index // x_grid # bs, num_proposals
         top_proposals_y = top_proposals_index % y_grid # bs, num_proposals
-        
+
         # bs, num_proposal, radius * 2 + 1, radius * 2 + 1
         top_proposals_key_x = top_proposals_x[:, :, None, None] + self.query_r_coor_x[None, None, :, :].to(top_proposals.device)
         top_proposals_key_y = top_proposals_y[:, :, None, None] + self.query_r_coor_y[None, None, :, :].to(top_proposals.device)
@@ -221,7 +223,7 @@ class TransFusionHead(nn.Module):
         top_proposals_key_index = torch.clamp(top_proposals_key_index, min=0, max=x_grid * y_grid-1)
         num_proposals = top_proposals_key_index.shape[1]
         key_feat = lidar_feat_flatten.gather(index=top_proposals_key_index.view(batch_size, 1, -1).expand(-1, lidar_feat_flatten.shape[1], -1), dim=-1)
-        key_feat = key_feat.view(batch_size, lidar_feat_flatten.shape[1], num_proposals, -1) 
+        key_feat = key_feat.view(batch_size, lidar_feat_flatten.shape[1], num_proposals, -1)
         key_pos = bev_pos.gather(index=top_proposals_key_index.view(batch_size, 1, -1).permute(0, 2, 1).expand(-1, -1, bev_pos.shape[-1]), dim=1)
         key_pos = key_pos.view(batch_size, num_proposals, -1, bev_pos.shape[-1])
         key_feat = key_feat.permute(0, 2, 1, 3).reshape(batch_size*num_proposals, lidar_feat_flatten.shape[1], -1)
@@ -288,10 +290,10 @@ class TransFusionHead(nn.Module):
         matched_ious = np.mean(res_tuple[5])
         heatmap = torch.cat(res_tuple[6], dim=0)
         return labels, label_weights, bbox_targets, bbox_weights, num_pos, matched_ious, heatmap
-        
+
 
     def get_targets_single(self, gt_bboxes_3d, gt_labels_3d, preds_dict):
-        
+
         num_proposals = preds_dict["center"].shape[-1]
         score = copy.deepcopy(preds_dict["heatmap"].detach())
         center = copy.deepcopy(preds_dict["center"].detach())
@@ -348,7 +350,7 @@ class TransFusionHead(nn.Module):
         # compute dense heatmap targets
         device = labels.device
         target_assigner_cfg = self.model_cfg.TARGET_ASSIGNER_CONFIG
-        feature_map_size = (self.grid_size[:2] // self.feature_map_stride) 
+        feature_map_size = (self.grid_size[:2] // self.feature_map_stride)
         heatmap = gt_bboxes_3d.new_zeros(self.num_classes, feature_map_size[1], feature_map_size[0])
         for idx in range(len(gt_bboxes_3d)):
             width = gt_bboxes_3d[idx][3]
@@ -402,7 +404,7 @@ class TransFusionHead(nn.Module):
         code_weights = self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['code_weights']
         reg_weights = bbox_weights * bbox_weights.new_tensor(code_weights)
 
-        loss_bbox = self.loss_bbox(preds, bbox_targets) 
+        loss_bbox = self.loss_bbox(preds, bbox_targets)
         loss_bbox = (loss_bbox * reg_weights).sum() / max(num_pos, 1)
 
         loss_dict["loss_cls"] = loss_cls.item() * self.loss_cls_weight
@@ -432,7 +434,7 @@ class TransFusionHead(nn.Module):
             batch_box_preds_for_iou = batch_box_preds.clone().detach()
             batch_box_targets_for_iou = batch_box_targets_for_iou.detach()
             layer_iou_loss = loss_utils.calculate_iou_loss_transfusionhead(
-                iou_preds=pred_dicts['iou'],  
+                iou_preds=pred_dicts['iou'],
                 batch_box_preds=batch_box_preds_for_iou,
                 gt_boxes=batch_box_targets_for_iou,
                 weights=bbox_weights,
@@ -447,7 +449,10 @@ class TransFusionHead(nn.Module):
         return loss_all,loss_dict
 
     def encode_bbox(self, bboxes):
-        code_size = 10
+        if bboxes.shape[-1] > 8:
+            code_size = 10
+        else:
+            code_size = 8
         targets = torch.zeros([bboxes.shape[0], code_size]).to(bboxes.device)
         targets[:, 0] = (bboxes[:, 0] - self.point_cloud_range[0]) / (self.feature_map_stride * self.voxel_size[0])
         targets[:, 1] = (bboxes[:, 1] - self.point_cloud_range[1]) / (self.feature_map_stride * self.voxel_size[1])
@@ -460,7 +465,7 @@ class TransFusionHead(nn.Module):
         return targets
 
     def decode_bbox(self, heatmap, rot, dim, center, height, vel, filter=False):
-        
+
         post_process_cfg = self.model_cfg.POST_PROCESSING
         score_thresh = post_process_cfg.SCORE_THRESH
         post_center_range = post_process_cfg.POST_CENTER_RANGE
@@ -472,7 +477,7 @@ class TransFusionHead(nn.Module):
         center[:, 0, :] = center[:, 0, :] * self.feature_map_stride * self.voxel_size[0] + self.point_cloud_range[0]
         center[:, 1, :] = center[:, 1, :] * self.feature_map_stride * self.voxel_size[1] + self.point_cloud_range[1]
         dim = dim.exp()
-        height = height - dim[:, 2:3, :] * 0.5 
+        height = height - dim[:, 2:3, :] * 0.5
         rots, rotc = rot[:, 0:1, :], rot[:, 1:2, :]
         rot = torch.atan2(rots, rotc)
 
@@ -496,7 +501,7 @@ class TransFusionHead(nn.Module):
         if filter is False:
             return predictions_dicts
 
-        thresh_mask = final_scores > score_thresh        
+        thresh_mask = final_scores > score_thresh
         mask = (final_box_preds[..., :3] >= post_center_range[:3]).all(2)
         mask &= (final_box_preds[..., :3] <= post_center_range[3:]).all(2)
 
@@ -553,6 +558,12 @@ class TransFusionHead(nn.Module):
                 dict(num_class=1, class_names=["Pedestrian"], indices=[1], radius=0.7),
                 dict(num_class=1, class_names=["Cyclist"], indices=[2], radius=0.7),
             ]
+        elif self.dataset_name == "custom":
+            self.tasks = [
+                dict(num_class=1, class_names=["Truck"], indices=[0], radius=0.7),
+                dict(num_class=1, class_names=["Forklift"], indices=[1], radius=0.7),
+                dict(num_class=1,class_names=["Worker"],indices=[2],radius=0.175),
+            ]
 
         new_ret_dict = []
         for i in range(batch_size):
@@ -560,14 +571,14 @@ class TransFusionHead(nn.Module):
             scores = ret_dict[i]["pred_scores"]
             labels = ret_dict[i]["pred_labels"]
             cmask = ret_dict[i]['cmask']
-            # IOU refine 
+            # IOU refine
             if self.model_cfg.POST_PROCESSING.get('USE_IOU_TO_RECTIFY_SCORE', False) and batch_iou is not None:
                 pred_iou = torch.clamp(batch_iou[i][0][cmask], min=0, max=1.0)
                 IOU_RECTIFIER = scores.new_tensor(self.model_cfg.POST_PROCESSING.IOU_RECTIFIER)
                 if len(IOU_RECTIFIER) == 1:
                     IOU_RECTIFIER = IOU_RECTIFIER.repeat(self.num_classes)
                 scores = torch.pow(scores, 1 - IOU_RECTIFIER[labels]) * torch.pow(pred_iou, IOU_RECTIFIER[labels])
-            
+
             keep_mask = torch.zeros_like(scores)
             for task in self.tasks:
                 task_mask = torch.zeros_like(scores)
@@ -584,7 +595,7 @@ class TransFusionHead(nn.Module):
                             nms_config=task_nms_config, score_thresh=task_nms_config.SCORE_THRES)
                 else:
                     task_keep_indices = torch.arange(task_mask.sum())
-                
+
                 if task_keep_indices.shape[0] != 0:
                     keep_indices = torch.where(task_mask != 0)[0][task_keep_indices]
                     keep_mask[keep_indices] = 1
@@ -595,4 +606,4 @@ class TransFusionHead(nn.Module):
         for k in range(batch_size):
             new_ret_dict[k]['pred_labels'] = new_ret_dict[k]['pred_labels'].int() + 1
 
-        return new_ret_dict 
+        return new_ret_dict

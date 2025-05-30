@@ -1,6 +1,7 @@
 from torch.utils.checkpoint import checkpoint
 from .detector3d_template import Detector3DTemplate
-
+import time
+import torch
 
 class TransFusion(Detector3DTemplate):
     def __init__(self, model_cfg, num_class, dataset):
@@ -9,7 +10,11 @@ class TransFusion(Detector3DTemplate):
 
     def forward(self, batch_dict):
         for cur_module in self.module_list:
+            # torch.cuda.synchronize()
+            # t = time.time()
             batch_dict = cur_module(batch_dict)
+            # torch.cuda.synchronize()
+            # print(f"{cur_module.__class__.__name__}: {time.time()-t}")
 
         if self.training:
             loss, tb_dict, disp_dict = self.get_training_loss(batch_dict)

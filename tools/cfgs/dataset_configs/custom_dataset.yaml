@@ -1,12 +1,15 @@
 DATASET: 'CustomDataset'
 DATA_PATH: '../data/custom'
 
-POINT_CLOUD_RANGE: [-75.2, -75.2, -2, 75.2, 75.2, 4]
+CLASS_NAMES: ['Truck', 'Forklift','Worker']
+PRED_VELOCITY: False
+POINT_CLOUD_RANGE: [-80, -10, -5, 10, 80, 10]
 
 MAP_CLASS_TO_KITTI: {
-    'Vehicle': 'Car',
-    'Pedestrian': 'Pedestrian',
-    'Cyclist': 'Cyclist',
+    # 'Car': 'Car',
+    'Truck': 'Truck',
+    'Forklift': 'Car',
+    'Worker': 'Pedestrian'
 }
 
 DATA_SPLIT: {
@@ -21,15 +24,14 @@ INFO_PATH: {
 
 POINT_FEATURE_ENCODING: {
     encoding_type: absolute_coordinates_encoding,
-    used_feature_list: ['x', 'y', 'z', 'intensity'],
-    src_feature_list: ['x', 'y', 'z', 'intensity'],
+    used_feature_list: ['x', 'y', 'z'],
+    src_feature_list: ['x', 'y', 'z'],
 }
 
 DATA_AUGMENTOR:
     DISABLE_AUG_LIST: ['placeholder']
     AUG_CONFIG_LIST:
         - NAME: gt_sampling
-          USE_ROAD_PLANE: False
           DB_INFO_PATH:
               - custom_dbinfos_train.pkl
           PREPARE: {
